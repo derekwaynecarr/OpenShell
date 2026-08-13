@@ -297,7 +297,7 @@ token authentication, and RBAC requirements.
 |---|---|---|---|
 | **Shared** (default) | Single static namespace from config | `{workspace}--{name}` | None |
 | **Managed** | `openshell-{gateway_id}-{workspace}` | bare sandbox name | Driver creates and deletes |
-| **Operator** | Workspace name maps 1:1 to a pre-provisioned namespace | bare sandbox name | External (platform team) |
+| **Operator** | Workspace resolves to a pre-provisioned namespace | bare sandbox name | External (platform team) |
 
 **Shared** renders all sandboxes into one configured namespace. Resource names
 embed the workspace prefix for collision avoidance. No namespace lifecycle
@@ -322,12 +322,16 @@ Operator mode does not create NetworkPolicies or copy image-pull Secrets.
 Platform teams must apply the gateway ingress boundary and provision configured
 image-pull Secrets in every operator-managed namespace.
 
-**Operator** uses pre-provisioned namespaces discovered through two optional
-sources: a K8s label selector (`operator_namespace_label`) and a drop-in
-allowlist file (`operator_namespace_file`). At least one must be configured.
+**Operator** uses pre-provisioned namespaces selected through a K8s label
+selector (`operator_namespace_label`), a drop-in allowlist file
+(`operator_namespace_file`), or an explicit workspace-to-namespace map
+(`operator_workspace_namespaces`). Exactly one must be configured. Label and
+file sources preserve the 1:1 workspace/namespace convention; the map allows
+platform operators to keep application-facing workspace names independent of
+cluster namespace naming conventions.
 The `OperatorNamespaceAllowlist` (`Arc<RwLock<BTreeSet<String>>>`) is populated
-at runtime by background watchers and read by the namespace resolver. Sandbox
-creation fails closed if the workspace is not in the current allowlist. Platform
+from the configured source and read by the namespace resolver. Sandbox creation
+fails closed if the workspace does not resolve to an allowed namespace. Platform
 teams manage namespace lifecycle externally. RBAC uses the same ClusterRole as
 managed mode but without namespace `create`/`delete` or ServiceAccount
 permissions.

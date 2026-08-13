@@ -11,10 +11,11 @@ workspace namespace modes via `workspace_mode`:
 - **Managed**: The driver auto-creates/deletes a K8s namespace per workspace
   (`openshell-{gateway_id}-{workspace_name}`), creates a ServiceAccount in each,
   and copies OpenShift SCC annotations from the gateway namespace when present.
-- **Operator**: Workspace names map 1:1 to pre-provisioned namespaces discovered
-  via label selector (`operator_namespace_label`) and/or drop-in allowlist file
-  (`operator_namespace_file`). Sandbox creation fails closed if the workspace
-  namespace is not in the current allowlist.
+- **Operator**: Workspaces resolve to pre-provisioned namespaces through a label
+  selector (`operator_namespace_label`), drop-in allowlist file
+  (`operator_namespace_file`), or explicit map
+  (`operator_workspace_namespaces`). Sandbox creation fails closed when no
+  allowed namespace resolves for the workspace.
 
 ## Runtime Model
 

@@ -63,16 +63,26 @@ struct KubernetesSecretsDriverSettings {
     allow_reference_namespace: bool,
     workspace_mode: WorkspaceMode,
     gateway_id: String,
+    operator_workspace_namespaces: BTreeMap<String, String>,
 }
 
 impl KubernetesSecretsDriverSettings {
-    fn target_namespace(&self, workspace: &str) -> String {
+    fn target_namespace(&self, workspace: &str) -> Result<String, Status> {
         match self.workspace_mode {
-            WorkspaceMode::Shared => self.namespace.clone(),
-            WorkspaceMode::Managed => {
-                format!("openshell-{}-{}", self.gateway_id, workspace)
+            WorkspaceMode::Shared => Ok(self.namespace.clone()),
+            WorkspaceMode::Managed => Ok(format!("openshell-{}-{}", self.gateway_id, workspace)),
+            WorkspaceMode::Operator if self.operator_workspace_namespaces.is_empty() => {
+                Ok(workspace.to_string())
             }
-            WorkspaceMode::Operator => workspace.to_string(),
+            WorkspaceMode::Operator => self
+                .operator_workspace_namespaces
+                .get(workspace)
+                .cloned()
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "workspace '{workspace}' has no configured operator namespace"
+                    ))
+                }),
         }
     }
 }
@@ -84,6 +94,7 @@ struct KubernetesSecretsDriverConfig {
     allow_reference_namespace: bool,
     workspace_mode: WorkspaceMode,
     gateway_id: Option<String>,
+    operator_workspace_namespaces: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,7 +214,7 @@ impl KubernetesSecretsCredentialDriver {
             reference
         } else {
             KubernetesSecretReference {
-                namespace: self.settings.target_namespace(&request.workspace),
+                namespace: self.settings.target_namespace(&request.workspace)?,
                 secret_name: managed_secret_name(
                     &request.workspace,
                     &request.provider_id,
@@ -538,6 +549,7 @@ impl KubernetesSecretsDriverSettings {
             allow_reference_namespace: config.allow_reference_namespace,
             workspace_mode: config.workspace_mode,
             gateway_id: config.gateway_id.unwrap_or_default(),
+            operator_workspace_namespaces: config.operator_workspace_namespaces,
         })
     }
 }
@@ -874,6 +886,7 @@ mod tests {
             allow_reference_namespace: false,
             workspace_mode: WorkspaceMode::Shared,
             gateway_id: String::new(),
+            operator_workspace_namespaces: BTreeMap::new(),
         };
         let reference = KubernetesSecretsCredentialDriver::parse_handle(
             &handle("v1:other-namespace:provider-secret"),
@@ -899,6 +912,7 @@ mod tests {
             allow_reference_namespace: true,
             workspace_mode: WorkspaceMode::Shared,
             gateway_id: String::new(),
+            operator_workspace_namespaces: BTreeMap::new(),
         };
         let reference = KubernetesSecretsCredentialDriver::parse_handle(
             &handle("v1:other-namespace:provider-secret"),
@@ -1107,9 +1121,10 @@ mod tests {
             allow_reference_namespace: false,
             workspace_mode: WorkspaceMode::Shared,
             gateway_id: String::new(),
+            operator_workspace_namespaces: BTreeMap::new(),
         };
-        assert_eq!(settings.target_namespace("team-a"), "openshell");
-        assert_eq!(settings.target_namespace("team-b"), "openshell");
+        assert_eq!(settings.target_namespace("team-a").unwrap(), "openshell");
+        assert_eq!(settings.target_namespace("team-b").unwrap(), "openshell");
     }
 
     #[test]
@@ -1119,9 +1134,16 @@ mod tests {
             allow_reference_namespace: false,
             workspace_mode: WorkspaceMode::Managed,
             gateway_id: "gw1".to_string(),
+            operator_workspace_namespaces: BTreeMap::new(),
         };
-        assert_eq!(settings.target_namespace("team-a"), "openshell-gw1-team-a");
-        assert_eq!(settings.target_namespace("team-b"), "openshell-gw1-team-b");
+        assert_eq!(
+            settings.target_namespace("team-a").unwrap(),
+            "openshell-gw1-team-a"
+        );
+        assert_eq!(
+            settings.target_namespace("team-b").unwrap(),
+            "openshell-gw1-team-b"
+        );
     }
 
     #[test]
@@ -1131,8 +1153,28 @@ mod tests {
             allow_reference_namespace: false,
             workspace_mode: WorkspaceMode::Operator,
             gateway_id: String::new(),
+            operator_workspace_namespaces: BTreeMap::new(),
         };
-        assert_eq!(settings.target_namespace("team-a"), "team-a");
-        assert_eq!(settings.target_namespace("prod-ns"), "prod-ns");
+        assert_eq!(settings.target_namespace("team-a").unwrap(), "team-a");
+        assert_eq!(settings.target_namespace("prod-ns").unwrap(), "prod-ns");
+    }
+
+    #[test]
+    fn target_namespace_operator_uses_explicit_mapping() {
+        let settings = KubernetesSecretsDriverSettings {
+            namespace: "openshell".to_string(),
+            allow_reference_namespace: false,
+            workspace_mode: WorkspaceMode::Operator,
+            gateway_id: String::new(),
+            operator_workspace_namespaces: BTreeMap::from([(
+                "team-a".to_string(),
+                "platform-team-a".to_string(),
+            )]),
+        };
+        assert_eq!(
+            settings.target_namespace("team-a").unwrap(),
+            "platform-team-a"
+        );
+        assert!(settings.target_namespace("unknown").is_err());
     }
 }

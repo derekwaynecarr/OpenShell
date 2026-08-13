@@ -237,6 +237,8 @@ server:
       # -- Path to a JSON file containing an array of namespace names
       # allowed in operator mode. Hot-reloaded on change.
       operatorNamespaceFile: ""
+      # -- Explicit workspace-to-namespace mappings for operator mode.
+      operatorWorkspaceNamespaces: {}
   # -- Disable TLS entirely - the server listens on plaintext HTTP.
   # Set to true when a reverse proxy / tunnel terminates TLS at the edge.
   disableTls: false

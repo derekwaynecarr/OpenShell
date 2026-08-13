@@ -508,3 +508,13 @@ tests:
       - matchRegex:
           path: spec.template.spec.volumes[1].name
           pattern: '^sandbox-jwt$'
+
+  - it: renders operator workspace namespace mappings
+    template: templates/gateway-config.yaml
+    set:
+      server.drivers.kubernetes.workspaceMode: operator
+      server.drivers.kubernetes.operatorWorkspaceNamespaces.team-a: platform-team-a
+    asserts:
+      - matchRegex:
+          path: data["gateway.toml"]
+          pattern: 'operator_workspace_namespaces\s*=\s*\{"team-a"\s*=\s*"platform-team-a"\s*\}'

@@ -137,6 +137,9 @@ data:
     {{- if .Values.server.drivers.kubernetes.operatorNamespaceFile }}
     operator_namespace_file      = {{ .Values.server.drivers.kubernetes.operatorNamespaceFile | quote }}
     {{- end }}
+    {{- with .Values.server.drivers.kubernetes.operatorWorkspaceNamespaces }}
+    operator_workspace_namespaces = { {{- range $index, $workspace := keys . | sortAlpha }}{{ if $index }}, {{ end }}{{ $workspace | quote }} = {{ index $.Values.server.drivers.kubernetes.operatorWorkspaceNamespaces $workspace | quote }}{{- end }} }
+    {{- end }}
     supervisor_sideload_method   = {{ include "openshell.supervisorSideloadMethod" . | quote }}
     topology                     = {{ .Values.supervisor.topology | default "combined" | quote }}
     sa_token_ttl_secs            = {{ .Values.server.sandboxJwt.k8sSaTokenTtlSecs | default 3600 }}
@@ -193,6 +196,9 @@ data:
     allow_reference_namespace = {{ .Values.server.credentialDrivers.kubernetesSecrets.allowReferenceNamespace }}
     workspace_mode               = {{ .Values.server.drivers.kubernetes.workspaceMode | default "shared" | quote }}
     gateway_id                   = {{ .Values.server.sandboxJwt.gatewayId | default (include "openshell.fullname" .) | quote }}
+    {{- with .Values.server.drivers.kubernetes.operatorWorkspaceNamespaces }}
+    operator_workspace_namespaces = { {{- range $index, $workspace := keys . | sortAlpha }}{{ if $index }}, {{ end }}{{ $workspace | quote }} = {{ index $.Values.server.drivers.kubernetes.operatorWorkspaceNamespaces $workspace | quote }}{{- end }} }
+    {{- end }}
     {{- end }}
 
     {{- if .Values.server.credentialDrivers.vault.enabled }}

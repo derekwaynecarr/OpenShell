@@ -297,6 +297,10 @@ pub struct KubernetesComputeConfig {
     /// operator mode. Hot-reloaded on change. Delivered via `ConfigMap` volume mount.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_namespace_file: Option<String>,
+    /// Optional explicit workspace-to-namespace mapping for operator mode.
+    /// When set, workspace names do not need to match namespace names.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub operator_workspace_namespaces: BTreeMap<String, String>,
     /// Kubernetes `ServiceAccount` assigned to sandbox pods and accepted by
     /// the gateway's `TokenReview` bootstrap authenticator.
     pub service_account_name: String,
@@ -413,6 +417,7 @@ impl Default for KubernetesComputeConfig {
             namespace: DEFAULT_K8S_NAMESPACE.to_string(),
             operator_namespace_label: None,
             operator_namespace_file: None,
+            operator_workspace_namespaces: BTreeMap::new(),
             service_account_name: DEFAULT_SANDBOX_SERVICE_ACCOUNT_NAME.to_string(),
             default_image: openshell_core::image::default_sandbox_image(),
             // Default empty so the gateway omits `imagePullPolicy` from pod
@@ -572,12 +577,22 @@ impl KubernetesComputeConfig {
             WorkspaceMode::Operator => {
                 let allowlist =
                     operator_allowlist.ok_or("operator mode requires a namespace allowlist")?;
+                let namespace = if self.operator_workspace_namespaces.is_empty() {
+                    workspace
+                } else {
+                    self.operator_workspace_namespaces
+                        .get(workspace)
+                        .map(String::as_str)
+                        .ok_or_else(|| {
+                            format!("workspace '{workspace}' has no configured operator namespace")
+                        })?
+                };
                 let namespaces = allowlist.read();
-                if namespaces.contains(workspace) {
-                    Ok(workspace.to_string())
+                if namespaces.contains(namespace) {
+                    Ok(namespace.to_string())
                 } else {
                     Err(format!(
-                        "workspace '{workspace}' is not in the operator namespace allowlist"
+                        "workspace '{workspace}' does not resolve to an allowed operator namespace"
                     ))
                 }
             }
@@ -646,16 +661,19 @@ impl KubernetesComputeConfig {
                 Ok(())
             }
             WorkspaceMode::Operator => {
-                if self.operator_namespace_label.is_none() && self.operator_namespace_file.is_none()
-                {
+                let source_count = usize::from(self.operator_namespace_label.is_some())
+                    + usize::from(self.operator_namespace_file.is_some())
+                    + usize::from(!self.operator_workspace_namespaces.is_empty());
+                if source_count == 0 {
                     return Err("operator workspace mode requires exactly one of \
-                         operator_namespace_label or operator_namespace_file"
+                         operator_namespace_label, operator_namespace_file, or \
+                         operator_workspace_namespaces"
                         .into());
                 }
-                if self.operator_namespace_label.is_some() && self.operator_namespace_file.is_some()
-                {
+                if source_count > 1 {
                     return Err("operator workspace mode requires exactly one of \
-                         operator_namespace_label or operator_namespace_file, not both"
+                         operator_namespace_label, operator_namespace_file, or \
+                         operator_workspace_namespaces"
                         .into());
                 }
                 if let Some(ref label) = self.operator_namespace_label
@@ -667,6 +685,13 @@ impl KubernetesComputeConfig {
                     && file.is_empty()
                 {
                     return Err("operator_namespace_file must not be empty when set".into());
+                }
+                for namespace in self.operator_workspace_namespaces.values() {
+                    if !is_dns_1123_label(namespace) {
+                        return Err(format!(
+                            "operator namespace '{namespace}' is not a valid DNS-1123 label"
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -1380,6 +1405,29 @@ mod tests {
     }
 
     #[test]
+    fn namespace_for_workspace_operator_uses_explicit_mapping() {
+        let allowlist =
+            OperatorNamespaceAllowlist::from_set(BTreeSet::from(["platform-team-a".to_string()]));
+        let cfg = KubernetesComputeConfig {
+            workspace_mode: WorkspaceMode::Operator,
+            operator_workspace_namespaces: BTreeMap::from([(
+                "team-a".to_string(),
+                "platform-team-a".to_string(),
+            )]),
+            ..KubernetesComputeConfig::default()
+        };
+        assert_eq!(
+            cfg.namespace_for_workspace("team-a", Some(&allowlist))
+                .unwrap(),
+            "platform-team-a"
+        );
+        assert!(
+            cfg.namespace_for_workspace("unknown", Some(&allowlist))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn kube_resource_name_shared_prefixes_workspace() {
         let cfg = KubernetesComputeConfig::default();
         assert_eq!(cfg.kube_resource_name("ws", "box1"), "ws--box1");
@@ -1530,6 +1578,19 @@ mod tests {
         let cfg = KubernetesComputeConfig {
             workspace_mode: WorkspaceMode::Operator,
             operator_namespace_file: Some("/etc/openshell/namespaces.json".to_string()),
+            ..KubernetesComputeConfig::default()
+        };
+        cfg.validate_workspace_mode().unwrap();
+    }
+
+    #[test]
+    fn validate_workspace_mode_operator_accepts_mapping_only() {
+        let cfg = KubernetesComputeConfig {
+            workspace_mode: WorkspaceMode::Operator,
+            operator_workspace_namespaces: BTreeMap::from([(
+                "team-a".to_string(),
+                "platform-team-a".to_string(),
+            )]),
             ..KubernetesComputeConfig::default()
         };
         cfg.validate_workspace_mode().unwrap();

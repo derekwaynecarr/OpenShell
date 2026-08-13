@@ -182,6 +182,7 @@ async fn main() -> Result<()> {
         namespace: args.sandbox_namespace,
         operator_namespace_label: args.operator_namespace_label,
         operator_namespace_file: args.operator_namespace_file,
+        operator_workspace_namespaces: BTreeMap::new(),
         service_account_name: args.sandbox_service_account,
         default_image: args.sandbox_image.unwrap_or_default(),
         image_pull_policy: args.sandbox_image_pull_policy.unwrap_or_default(),

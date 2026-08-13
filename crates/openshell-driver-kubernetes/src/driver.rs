@@ -499,6 +499,16 @@ impl KubernetesComputeDriver {
         let operator_allowlist = if matches!(config.workspace_mode, WorkspaceMode::Operator) {
             let allowlist = OperatorNamespaceAllowlist::new();
 
+            if !config.operator_workspace_namespaces.is_empty() {
+                allowlist.replace(
+                    config
+                        .operator_workspace_namespaces
+                        .values()
+                        .cloned()
+                        .collect(),
+                );
+            }
+
             if let Some(ref label) = config.operator_namespace_label {
                 spawn_namespace_label_watcher(
                     watch_client.clone(),
@@ -1327,16 +1337,10 @@ impl KubernetesComputeDriver {
                 self.ensure_image_pull_secrets(&namespace).await?;
                 namespace
             }
-            WorkspaceMode::Operator => {
-                if let Some(ref allowlist) = self.operator_allowlist
-                    && !allowlist.contains(workspace)
-                {
-                    return Err(KubernetesDriverError::Precondition(format!(
-                        "workspace '{workspace}' is not in the operator namespace allowlist"
-                    )));
-                }
-                workspace.to_string()
-            }
+            WorkspaceMode::Operator => self
+                .config
+                .namespace_for_workspace(workspace, self.operator_allowlist.as_ref())
+                .map_err(KubernetesDriverError::Precondition)?,
         };
 
         if self.config.is_multi_namespace() {
